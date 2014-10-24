@@ -1,0 +1,174 @@
+
+Getting and Cleaning Data - Course Project
+=======================================
+
+###Goal 
+
+Given a dataset, this document describes the process  of createing a 
+ dataset, 'SubjectActivitySummary', containing the required averages of the 
+input dataset and satisfying the following three properties.
+
+1. Each variable forms a column,
+2. Each observation forms a row, and
+3. Each type of observational unit forms a table.
+
+
+
+###Setting up for loading the input files
+Downloaded the zip file getdata-projectfiles-UCI HAR Dataset and extracted the files.
+It created a new folder called "UCI HAR Dataset". After going through the README and examining the files. Since X_test and X_train had the processed data, I did not include the raw data presented in the folders "Inertial Signals". The remaining required files, which totalled 8 '.txt' files, were downloaded into my working directory for this project and read  using the following script. I chose to keep the original file names to make it simpler for the evaluators becuase they are familiar with the filenames.
+
+```{r}
+activity_labels <- read.table("activity_labels.txt")
+features <- read.table("features.txt")
+subject_test <- read.table("subject_test.txt")
+subject_train <- read.table("subject_train.txt")
+X_test <- read.table("X_test.txt")
+X_train <- read.table("X_train.txt")
+y_test <- read.table("y_test.txt")
+y_train <- read.table("y_train.txt")
+ls()
+```
+
+###Step1. Merging the training and the test sets to create one dataset:
+We call the resulting data frame 'MainData' and it 
+should have all rows of X_train and all rows of Y_train; we use the rbind function to 
+accomplish this.  To verify that this operation was done right, we check if the number of rows of 
+MainData is equal to the sum of the number of rows of X_train and X_test. 
+
+```{r}
+MainData <- rbind(X_test, X_train)
+#testing if number of rows of MainData is the sum of those for X_test and X_train.
+temp1 <- dim(MainData) 
+temp2 <- dim(X_test)
+temp3 <- dim(X_train)
+temp1[[1]] == (temp2[[1]] + temp3[[1]])
+```
+
+###Step 2: Extracting the columns with only the mean and standard deviation for each measurement. 
+We use the grep function to get the indices with the matching pattern.
+
+```{r} 
+MeanCols <- grep("mean()", as.character(features$V2))
+StdCols <- grep("std()", as.character(features$V2))
+MeanStdCols <-sort(c(MeanCols, StdCols))
+```
+'MeanStdCols' is a list of indices of the columns to be extracted from 
+MainData. To extract the columns we use the select function from the 
+'dplyr' library.  When we load the library, we expect to get some messages and 
+warnings. Since these don't add any value  for the current exercise we use the 
+'hide' option to  hide these messages from the reader. we call the resulting data frame 
+'FilteredData'. We verify that FilteredData does indeed have the columns 
+whose indices are given by MeanStdCols.
+
+```{r message=FALSE, warning=FALSE} 
+library(dplyr)
+FilteredData <- select(MainData, MeanStdCols)
+Dims <- dim(FilteredData)
+Dims[2] == length(MeanStdCols)
+```
+###Step3: Providing descriptive activity names for the activities in the data set.
+The activities are provided in 'y_test' and 'y_train' in a coded form with 
+integers from 1 to 6. The mapping between these codes to the activity name is 
+provided in 'activity_labels'. With this information we convert the activity codes 
+in 'y_test' and 'y_train' to activity names as follows.
+
+```{r}
+substitute <- function(x){index <- x
+ x <- as.character(activity_labels$V2[index])
+}
+ActLblTest <- sapply(y_test, substitute)
+ActLblTrain <- sapply(y_train, substitute)
+Activity <- c(ActLblTest, ActLblTrain)
+```
+
+We now have a list of 10299 activity labels corresponding the 'test' and 
+'train' data, put together in that order. We add a column to FilteredData 
+with the activity labels as follows and thus label each observation with an 
+activity label. such as WALKING, LAYING, etc. 
+
+```{r}
+dim(FilteredData)
+FilteredData <- cbind(Activity, FilteredData)
+dim(FilteredData)
+str(FilteredData)
+```
+ 
+###Step 4: Appropriately labeling the data set with descriptive variable names.
+
+As you can see from the output of str(FilteredData), the columns of this data frame are 
+labelled "Activity", "V1", V2", "V3",... Except the first one all other labels 
+are not descriptive.  The complete set of descriptive names for the  variables are 
+given in  the 'features' data frame. However, we selected only 79 of these 561 variables and 
+the indices of these 79 variables are in 'MeanStdCols'. We use this information to 
+name the variables and we verify that this is done right by examining the structure 
+of 'FilteredData'. 
+
+```{r} 
+SubsetFeatures <- features$V2[MeanStdCols]
+SubsetFeatures <- c("Activity", as.character(SubsetFeatures))
+colnames(FilteredData) <- SubsetFeatures
+str(FilteredData) 
+```
+
+###Step 5: From the data set in step 4, create a second, independent tidy data set with the average of each variable for each activity and each subject.
+
+To do this we group the data by two variables - 'Subject' and 'Activity' and apply the mean function.
+```{r message=FALSE, warning=FALSE} 
+Subject <- factor(c(subject_test$V1, subject_train$V1))
+#Add this column to FilteredData
+FilteredData <- cbind(Subject, FilteredData)
+#convert to a Data Table
+library(data.table)
+DataTable <- data.table(FilteredData)
+SubjectActivitySummary <- DataTable[ , lapply(.SD,mean), by = list(Subject, Activity)]
+```
+
+We now need to give names for the columns of the 'SubjectActivitySummary' that reflect the fact that 
+these are MEAN values. We do that by appending "MEAN-" to the name of the feature, eg., if the name of the 
+feature is 'tGravityAcc-mean()-X' in our tidy dataset, SubjectActivitySummary, we name the column of averages for this 
+feature as 'MEAN-tGravityAcc-mean()-X'.
+
+```{r}
+#Naming the columns of SubjectActivitySummary  
+CurrColNames <- colnames(SubjectActivitySummary)
+str(CurrColNames)
+pasteMean <- function(x){
+	y <- c("MEAN", x)
+	paste0(y, collapse="-")
+	}
+NewColNames <- lapply(CurrColNames[3:81],pasteMean )
+NewColNames <- c(CurrColNames[1:2], NewColNames[1:79])
+NewColNames <- unlist(NewColNames)
+OldColNames <- colnames(SubjectActivitySummary)
+
+#checking to see if the column names look right.
+head(NewColNames,10)
+```
+
+The final step is to assign these column names to 'SubjectActivitySummary'.
+```{r}
+setnames(SubjectActivitySummary, OldColNames, as.character(NewColNames))
+#head(SubjectActivitySummary,3)
+write.table(SubjectActivitySummary, file = "SubjectActivitySummary.txt", row.name = FALSE)
+```
+
+###Conclusion
+Note that the 'SubjectActivitySummary' satisfies the the following three properties.
+
+1. Each variable forms a column.
+2. Each observation forms a row.
+3. Each type of observational unit forms a table
+
+and thus according to the published literature by Hadley Wickam [1], 
+is a tidy data.
+
+
+[1] Hadley Wickham, "Tidy data",
+The Journal of Statistical Software, vol. 59, 2014
+[http://vita.had.co.nz/papers/tidy-data.pdf].
+
+
+
+
+
